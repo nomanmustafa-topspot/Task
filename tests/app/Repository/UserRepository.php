@@ -2,21 +2,10 @@
 
 namespace DTApi\Repository;
 
-use DTApi\Models\Company;
-use DTApi\Models\Department;
-use DTApi\Models\Type;
-use DTApi\Models\UsersBlacklist;
-use Illuminate\Support\Facades\Log;
+use DTApi\Models\{Company, Department, Type, UsersBlacklist, User, Town, UserMeta, UserTowns, UserLanguages};
 use Monolog\Logger;
-use DTApi\Models\User;
-use DTApi\Models\Town;
-use DTApi\Models\UserMeta;
-use DTApi\Models\UserTowns;
-use DTApi\Events\JobWasCreated;
-use DTApi\Models\UserLanguages;
-use Monolog\Handler\StreamHandler;
 use Illuminate\Support\Facades\DB;
-use Monolog\Handler\FirePHPHandler;
+use Monolog\Handler\{StreamHandler, FirePHPHandler};
 
 /**
  * Class BookingRepository
@@ -31,184 +20,190 @@ class UserRepository extends BaseRepository
     /**
      * @param User $model
      */
-    function __construct(User $model)
+    public function __construct(User $model)
     {
         parent::__construct($model);
-//        $this->mailer = $mailer;
+        $this->initializeLogger();
+    }
+    
+    /**
+     * Initialize the logger.
+     */
+    protected function initializeLogger()
+    {
         $this->logger = new Logger('admin_logger');
-
         $this->logger->pushHandler(new StreamHandler(storage_path('logs/admin/laravel-' . date('Y-m-d') . '.log'), Logger::DEBUG));
         $this->logger->pushHandler(new FirePHPHandler());
     }
 
-    public function createOrUpdate($id = null, $request)
-    { 
-        $model = is_null($id) ? new User : User::findOrFail($id);
-        $model->user_type = $request['role'];
-        $model->name = $request['name'];
-        $model->company_id = $request['company_id'] != '' ? $request['company_id'] : 0;
-        $model->department_id = $request['department_id'] != '' ? $request['department_id'] : 0;
-        $model->email = $request['email'];
-        $model->dob_or_orgid = $request['dob_or_orgid'];
-        $model->phone = $request['phone'];
-        $model->mobile = $request['mobile'];
+    public function createOrUpdate($id = null, array $request)
+    {
+        $user = $id ? User::findOrFail($id) : new User;
 
+        $this->updateUserData($user, $request);
+        $this->updateUserRole($user, $request['role']);
+        $this->handleMetaData($user, $request);
 
-        if (!$id || $id && $request['password']) $model->password = bcrypt($request['password']);
-        $model->detachAllRoles();
-        $model->save();
-        $model->attachRole($request['role']);
-        $data = array();
+        $this->handleBlacklist($user, $request['translator_ex'] ?? []);
+        $this->handleUserLanguages($user, $request['user_language'] ?? []);
+        $this->handleTowns($user, $request['user_towns_projects'] ?? [], $request['new_towns'] ?? null);
 
-        if ($request['role'] == env('CUSTOMER_ROLE_ID')) {
+        $this->updateUserStatus($user, $request['status']);
 
-            if($request['consumer_type'] == 'paid')
-            {
-                if($request['company_id'] == '')
-                {
-                    $type = Type::where('code', 'paid')->first();
-                    $company = Company::create(['name' => $request['name'], 'type_id' => $type->id, 'additional_info' => 'Created automatically for user ' . $model->id]);
-                    $department = Department::create(['name' => $request['name'], 'company_id' => $company->id, 'additional_info' => 'Created automatically for user ' . $model->id]);
+        return $user;
+    }
 
-                    $model->company_id = $company->id;
-                    $model->department_id = $department->id;
-                    $model->save();
-                }
-            }
+    /**
+     * Update user basic information.
+     *
+     * @param User $user
+     * @param array $request
+     */
+    protected function updateUserData(User $user, array $request)
+    {
+        $user->fill([
+            'user_type' => $request['role'],
+            'name' => $request['name'],
+            'company_id' => $request['company_id'] ?: 0,
+            'department_id' => $request['department_id'] ?: 0,
+            'email' => $request['email'],
+            'dob_or_orgid' => $request['dob_or_orgid'],
+            'phone' => $request['phone'],
+            'mobile' => $request['mobile'],
+        ]);
 
-            $user_meta = UserMeta::firstOrCreate(['user_id' => $model->id]);
-            $old_meta = $user_meta->toArray();
-            $user_meta->consumer_type = $request['consumer_type'];
-            $user_meta->customer_type = $request['customer_type'];
-            $user_meta->username = $request['username'];
-            $user_meta->post_code = $request['post_code'];
-            $user_meta->address = $request['address'];
-            $user_meta->city = $request['city'];
-            $user_meta->town = $request['town'];
-            $user_meta->country = $request['country'];
-            $user_meta->reference = (isset($request['reference']) && $request['reference'] == 'yes') ? '1' : '0';
-            $user_meta->additional_info = $request['additional_info'];
-            $user_meta->cost_place = isset($request['cost_place']) ? $request['cost_place'] : '';
-            $user_meta->fee = isset($request['fee']) ? $request['fee'] : '';
-            $user_meta->time_to_charge = isset($request['time_to_charge']) ? $request['time_to_charge'] : '';
-            $user_meta->time_to_pay = isset($request['time_to_pay']) ? $request['time_to_pay'] : '';
-            $user_meta->charge_ob = isset($request['charge_ob']) ? $request['charge_ob'] : '';
-            $user_meta->customer_id = isset($request['customer_id']) ? $request['customer_id'] : '';
-            $user_meta->charge_km = isset($request['charge_km']) ? $request['charge_km'] : '';
-            $user_meta->maximum_km = isset($request['maximum_km']) ? $request['maximum_km'] : '';
-            $user_meta->save();
-            $new_meta = $user_meta->toArray();
-
-            $blacklistUpdated = [];
-            $userBlacklist = UsersBlacklist::where('user_id', $id)->get();
-            $userTranslId = collect($userBlacklist)->pluck('translator_id')->all();
-
-            $diff = null;
-            if ($request['translator_ex']) {
-                $diff = array_intersect($userTranslId, $request['translator_ex']);
-            }
-            if ($diff || $request['translator_ex']) {
-                foreach ($request['translator_ex'] as $translatorId) {
-                    $blacklist = new UsersBlacklist();
-                    if ($model->id) {
-                        $already_exist = UsersBlacklist::translatorExist($model->id, $translatorId);
-                        if ($already_exist == 0) {
-                            $blacklist->user_id = $model->id;
-                            $blacklist->translator_id = $translatorId;
-                            $blacklist->save();
-                        }
-                        $blacklistUpdated [] = $translatorId;
-                    }
-
-                }
-                if ($blacklistUpdated) {
-                    UsersBlacklist::deleteFromBlacklist($model->id, $blacklistUpdated);
-                }
-            } else {
-                UsersBlacklist::where('user_id', $model->id)->delete();
-            }
-
-
-        } else if ($request['role'] == env('TRANSLATOR_ROLE_ID')) {
-
-            $user_meta = UserMeta::firstOrCreate(['user_id' => $model->id]);
-
-            $user_meta->translator_type = $request['translator_type'];
-            $user_meta->worked_for = $request['worked_for'];
-            if ($request['worked_for'] == 'yes') {
-                $user_meta->organization_number = $request['organization_number'];
-            }
-            $user_meta->gender = $request['gender'];
-            $user_meta->translator_level = $request['translator_level'];
-            $user_meta->additional_info = $request['additional_info'];
-            $user_meta->post_code = $request['post_code'];
-            $user_meta->address = $request['address'];
-            $user_meta->address_2 = $request['address_2'];
-            $user_meta->town = $request['town'];
-            $user_meta->save();
-
-            $data['translator_type'] = $request['translator_type'];
-            $data['worked_for'] = $request['worked_for'];
-            if ($request['worked_for'] == 'yes') {
-                $data['organization_number'] = $request['organization_number'];
-            }
-            $data['gender'] = $request['gender'];
-            $data['translator_level'] = $request['translator_level'];
-
-            $langidUpdated = [];
-            if ($request['user_language']) {
-                foreach ($request['user_language'] as $langId) {
-                    $userLang = new UserLanguages();
-                    $already_exit = $userLang::langExist($model->id, $langId);
-                    if ($already_exit == 0) {
-                        $userLang->user_id = $model->id;
-                        $userLang->lang_id = $langId;
-                        $userLang->save();
-                    }
-                    $langidUpdated[] = $langId;
-
-                }
-                if ($langidUpdated) {
-                    $userLang::deleteLang($model->id, $langidUpdated);
-                }
-            }
-
+        if (isset($request['password'])) {
+            $user->password = bcrypt($request['password']);
         }
 
-        if ($request['new_towns']) {
+        $user->save();
+    }
 
-            $towns = new Town;
-            $towns->townname = $request['new_towns'];
-            $towns->save();
-            $newTownsId = $towns->id;
+    /**
+     * Update user role.
+     *
+     * @param User $user
+     * @param int $role
+     */
+    protected function updateUserRole(User $user, int $role)
+    {
+        $user->detachAllRoles();
+        $user->attachRole($role);
+    }
+
+    /**
+     * Handle user meta data.
+     *
+     * @param User $user
+     * @param array $request
+     */
+    protected function handleMetaData(User $user, array $request)
+    {
+        $userMeta = UserMeta::firstOrCreate(['user_id' => $user->id]);
+        $userMeta->fill($this->getMetaData($request));
+        $userMeta->save();
+    }
+
+    /**
+     * Get meta data array.
+     *
+     * @param array $request
+     * @return array
+     */
+    protected function getMetaData(array $request)
+    {
+        return [
+            'consumer_type' => $request['consumer_type'] ?? null,
+            'customer_type' => $request['customer_type'] ?? null,
+            'username' => $request['username'] ?? null,
+            'post_code' => $request['post_code'] ?? null,
+            'address' => $request['address'] ?? null,
+            'city' => $request['city'] ?? null,
+            'town' => $request['town'] ?? null,
+            'country' => $request['country'] ?? null,
+            'reference' => isset($request['reference']) && $request['reference'] === 'yes' ? 1 : 0,
+            'additional_info' => $request['additional_info'] ?? null,
+            'cost_place' => $request['cost_place'] ?? null,
+            'fee' => $request['fee'] ?? null,
+            'time_to_charge' => $request['time_to_charge'] ?? null,
+            'time_to_pay' => $request['time_to_pay'] ?? null,
+            'charge_ob' => $request['charge_ob'] ?? null,
+            'customer_id' => $request['customer_id'] ?? null,
+            'charge_km' => $request['charge_km'] ?? null,
+            'maximum_km' => $request['maximum_km'] ?? null,
+        ];
+    }
+
+    /**
+     * Handle blacklist operations for a user.
+     *
+     * @param User $user
+     * @param array $translatorIds
+     */
+    protected function handleBlacklist(User $user, array $translatorIds)
+    {
+        if (empty($translatorIds)) {
+            UsersBlacklist::where('user_id', $user->id)->delete();
+            return;
         }
 
-        $townidUpdated = [];
-        if ($request['user_towns_projects']) {
-            $del = DB::table('user_towns')->where('user_id', '=', $model->id)->delete();
-            foreach ($request['user_towns_projects'] as $townId) {
-                $userTown = new UserTowns();
-                $already_exit = $userTown::townExist($model->id, $townId);
-                if ($already_exit == 0) {
-                    $userTown->user_id = $model->id;
-                    $userTown->town_id = $townId;
-                    $userTown->save();
-                }
-                $townidUpdated[] = $townId;
+        $existingBlacklist = UsersBlacklist::where('user_id', $user->id)->pluck('translator_id')->toArray();
+        $newBlacklist = array_diff($translatorIds, $existingBlacklist);
 
-            }
+        foreach ($newBlacklist as $translatorId) {
+            UsersBlacklist::firstOrCreate(['user_id' => $user->id, 'translator_id' => $translatorId]);
         }
 
-        if ($request['status'] == '1') {
-            if ($model->status != '1') {
-                $this->enable($model->id);
-            }
-        } else {
-            if ($model->status != '0') {
-                $this->disable($model->id);
-            }
+        UsersBlacklist::deleteFromBlacklist($user->id, $existingBlacklist);
+    }
+
+    /**
+     * Handle user language operations.
+     *
+     * @param User $user
+     * @param array $languages
+     */
+    protected function handleUserLanguages(User $user, array $languages)
+    {
+        foreach ($languages as $langId) {
+            UserLanguages::firstOrCreate(['user_id' => $user->id, 'lang_id' => $langId]);
         }
-        return $model ? $model : false;
+
+        UserLanguages::deleteLang($user->id, $languages);
+    }
+
+    /**
+     * Handle towns associated with a user.
+     *
+     * @param User $user
+     * @param array $townIds
+     * @param string|null $newTown
+     */
+    protected function handleTowns(User $user, array $townIds, $newTown = null)
+    {
+        if ($newTown) {
+            $town = Town::create(['townname' => $newTown]);
+            $townIds[] = $town->id;
+        }
+
+        DB::table('user_towns')->where('user_id', '=', $user->id)->delete();
+
+        foreach ($townIds as $townId) {
+            UserTowns::firstOrCreate(['user_id' => $user->id, 'town_id' => $townId]);
+        }
+    }
+
+    /**
+     * Update user status.
+     *
+     * @param User $user
+     * @param string $status
+     */
+    protected function updateUserStatus(User $user, $status)
+    {
+        if ($user->status !== $status) {
+            $status === '1' ? $this->enable($user->id) : $this->disable($user->id);
+        }
     }
 
     public function enable($id)
@@ -230,6 +225,7 @@ class UserRepository extends BaseRepository
     public function getTranslators()
     {
         return User::where('user_type', 2)->get();
+        
     }
     
 }

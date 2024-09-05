@@ -3,37 +3,32 @@ namespace DTApi\Helpers;
 
 use Carbon\Carbon;
 use DTApi\Models\Job;
-use DTApi\Models\User;
-use DTApi\Models\Language;
 use DTApi\Models\UserMeta;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Log;
+use DTApi\Models\Language;
 
 class TeHelper
 {
     public static function fetchLanguageFromJobId($id)
     {
         $language = Language::findOrFail($id);
-        return $language1 = $language->language;
+        return $language->language;
     }
 
     public static function getUsermeta($user_id, $key = false)
     {
-        return $user = UserMeta::where('user_id', $user_id)->first()->$key;
-        if (!$key)
-            return $user->usermeta()->get()->all();
-        else {
-            $meta = $user->usermeta()->where('key', '=', $key)->get()->first();
-            if ($meta)
-                return $meta->value;
-            else return '';
+        $userMeta = UserMeta::where('user_id', $user_id)->first();
+
+        if (!$key) {
+            return $userMeta->usermeta()->get()->all();
         }
+
+        $meta = $userMeta->usermeta()->where('key', '=', $key)->first();
+        return $meta ? $meta->value : '';
     }
 
-    public static function convertJobIdsInObjs($jobs_ids)
+    public static function convertJobIdsInObjs(array $jobs_ids)
     {
-
-        $jobs = array();
+        $jobs = [];
         foreach ($jobs_ids as $job_obj) {
             $jobs[] = Job::findOrFail($job_obj->id);
         }
@@ -44,23 +39,23 @@ class TeHelper
     {
         $due_time = Carbon::parse($due_time);
         $created_at = Carbon::parse($created_at);
-
         $difference = $due_time->diffInHours($created_at);
 
-
-        if($difference <= 90)
-            $time = $due_time;
-        elseif ($difference <= 24) {
-            $time = $created_at->addMinutes(90);
-        } elseif ($difference > 24 && $difference <= 72) {
-            $time = $created_at->addHours(16);
-        } else {
-            $time = $due_time->subHours(48);
+        if ($difference <= 1.5) {
+            return $due_time->format('Y-m-d H:i:s');
         }
 
-        return $time->format('Y-m-d H:i:s');
+        if ($difference <= 24) {
+            return $created_at->addMinutes(90)->format('Y-m-d H:i:s');
+        }
 
+        if ($difference > 24 && $difference <= 72) {
+            return $created_at->addHours(16)->format('Y-m-d H:i:s');
+        }
+
+        return $due_time->subHours(48)->format('Y-m-d H:i:s');
     }
+
 
 }
 

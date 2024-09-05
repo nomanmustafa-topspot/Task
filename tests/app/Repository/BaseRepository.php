@@ -6,6 +6,7 @@ use Validator;
 use Illuminate\Database\Eloquent\Model;
 use DTApi\Exceptions\ValidationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Validation\Validator as IlluminateValidator;
 
 class BaseRepository
 {
@@ -93,7 +94,7 @@ class BaseRepository
      */
     public function query()
     {
-        return $this->model->query();
+        return $this->model->newQuery();
     }
 
     /**
@@ -102,8 +103,7 @@ class BaseRepository
      */
     public function instance(array $attributes = [])
     {
-        $model = $this->model;
-        return new $model($attributes);
+        return new $this->model($attributes);
     }
 
     /**
@@ -129,10 +129,7 @@ class BaseRepository
      */
     public function validator(array $data = [], $rules = null, array $messages = [], array $customAttributes = [])
     {
-        if (is_null($rules)) {
-            $rules = $this->validationRules;
-        }
-
+        $rules = $rules ?? $this->validationRules;
         return Validator::make($data, $rules, $messages, $customAttributes);
     }
 
@@ -147,7 +144,27 @@ class BaseRepository
     public function validate(array $data = [], $rules = null, array $messages = [], array $customAttributes = [])
     {
         $validator = $this->validator($data, $rules, $messages, $customAttributes);
-        return $this->_validate($validator);
+        return $this->validateWithValidator($validator);
+    }
+
+    /**
+     * Validate using the validator instance.
+     *
+     * @param IlluminateValidator $validator
+     * @return bool
+     * @throws ValidationException
+     */
+    protected function validateWithValidator(IlluminateValidator $validator)
+    {
+        if (!empty($attributeNames = $this->validatorAttributeNames())) {
+            $validator->setAttributeNames($attributeNames);
+        }
+
+        if ($validator->fails()) {
+            throw (new ValidationException)->setValidator($validator);
+        }
+
+        return true;
     }
 
     /**
