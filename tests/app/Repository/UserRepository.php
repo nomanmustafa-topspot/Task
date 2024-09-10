@@ -1,7 +1,7 @@
 <?php
 
 namespace DTApi\Repository;
-
+// Removed the un neccessory files of start load 
 use DTApi\Models\{Company, Department, Type, UsersBlacklist, User, Town, UserMeta, UserTowns, UserLanguages};
 use Monolog\Logger;
 use Illuminate\Support\Facades\DB;
@@ -20,6 +20,7 @@ class UserRepository extends BaseRepository
     /**
      * @param User $model
      */
+    // Adjust the public constructor function and add the initializeLogger function
     public function __construct(User $model)
     {
         parent::__construct($model);
@@ -35,7 +36,8 @@ class UserRepository extends BaseRepository
         $this->logger->pushHandler(new StreamHandler(storage_path('logs/admin/laravel-' . date('Y-m-d') . '.log'), Logger::DEBUG));
         $this->logger->pushHandler(new FirePHPHandler());
     }
-
+    // In this add the multiple function for update the user role wise data and meta handle user language
+    // this function split into multiple function i created privated function
     public function createOrUpdate($id = null, array $request)
     {
         $user = $id ? User::findOrFail($id) : new User;
@@ -225,7 +227,6 @@ class UserRepository extends BaseRepository
     public function getTranslators()
     {
         return User::where('user_type', 2)->get();
-        
     }
     
 }

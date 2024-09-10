@@ -52,9 +52,11 @@ class BookingRepository extends BaseRepository
     }
 
     /**
-     * @param $user_id
+     * @param $userId
      * @return array
      */
+    // For more realable User_id replace to UserId and enhance the code funcitonality for use collection to reduce the additional code 
+    // Split this code of multiple funcitons for better understand code review
     public function getUsersJobs($userId)
     {
         $user = User::find($userId);
@@ -91,6 +93,7 @@ class BookingRepository extends BaseRepository
      * @param $user_id
      * @return array
      */
+    // Same this repace user_id to userId and reduce the code for more checks for better understand code i added the new funciton  getCustomerJobHistory 
     public function getUsersJobsHistory($userId, $request)
     {
         $user = User::find($userId);
@@ -1434,6 +1437,8 @@ class BookingRepository extends BaseRepository
     }
 
     /*Function to accept the job with the job id*/
+    // removed the $adminSenderEmail and  $adminemail of config value there are no need 
+
     public function acceptJobWithId($job_id, $cuser)
     {
         $job = Job::findOrFail($job_id);
@@ -1991,7 +1996,7 @@ class BookingRepository extends BaseRepository
 
         return ['throttles' => $throttles];
     }
-
+    // To handle Multiple If conditions i enhance the functionality of code create private function and called into it to better understand code 
     public function bookingExpireNoAccepted()
     {
         $languages = Language::active()->orderBy('language')->get();
@@ -2118,7 +2123,7 @@ class BookingRepository extends BaseRepository
         $throttle->save();
         return ['success', 'Changes saved'];
     }
-
+    // Job and user id set fo readable and created functions updateJobForReopen and prepareReopenData for split code and better understand code 
     public function reopen($request)
     {
         $jobId = $request['jobid'];

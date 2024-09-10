@@ -30,7 +30,7 @@ class BaseRepository
     }
 
     /**
-     * @return array
+     * @return array add for array
      */
     public function validatorAttributeNames(): array
     {
@@ -92,6 +92,7 @@ class BaseRepository
     /**
      * @return \Illuminate\Database\Eloquent\Builder
      */
+    // I'm adding newQuery modal 
     public function query()
     {
         return $this->model->newQuery();
@@ -101,6 +102,7 @@ class BaseRepository
      * @param array $attributes
      * @return Model
      */
+    // I define using for the model and one line to return modal attributes
     public function instance(array $attributes = []): Model
     {
         return new $this->model($attributes);
@@ -127,6 +129,7 @@ class BaseRepository
      * @param array $customAttributes
      * @return \Illuminate\Validation\Validator
      */
+    // No need for check the is_null condition just simply add this 
     public function validator(array $data = [], $rules = null, array $messages = [], array $customAttributes = [])
     {
         $rules = $rules ?? $this->validationRules;
@@ -141,6 +144,7 @@ class BaseRepository
      * @return bool
      * @throws ValidationException
      */
+    // I Created the new validator funciton for handle Muttator
     public function validate(array $data = [], $rules = null, array $messages = [], array $customAttributes = [])
     {
         $validator = $this->validator($data, $rules, $messages, $customAttributes);
@@ -154,6 +158,7 @@ class BaseRepository
      * @return bool
      * @throws ValidationException
      */
+    // new created this function for handle validation of set name attributes
     protected function validateWithValidator(IlluminateValidator $validator): bool
     {
         if (!empty($attributeNames = $this->validatorAttributeNames())) {
